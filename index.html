@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Eviga: The Resonant Empath</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bangers&family=Comic+Neue:ital,wght@0,400;0,700;1,700&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --paper:#f0e6cf;
+    --ink:#14100d;
+    --purple:#4a2f66;
+    --amber:#e8a13a;
+    --amber-bright:#ffcf6b;
+    --dusk:#0d0a12;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{height:100%;}
+  body{
+    font-family:'Comic Neue', cursive, sans-serif;
+    background:var(--dusk);
+    color:var(--paper);
+    overflow-x:hidden;
+    overscroll-behavior:none; /* stop rubber-band bounce from flashing content at the scroll boundaries */
+  }
+  .font-bangers{ font-family:'Bangers', cursive; letter-spacing:0.04em; }
+
+  /* ============ HUD ============ */
+  #hud{
+    position:fixed; z-index:600;
+    top: calc(2.2vw + 13px + 14px);
+    right: calc(2.2vw + 13px + 14px);
+    background:var(--paper); color:var(--ink);
+    border:3px solid var(--ink);
+    padding:6px 14px;
+    font-size:0.75rem; font-weight:700;
+    box-shadow:4px 4px 0 var(--ink);
+    pointer-events:none;
+  }
+  #scroll-hint{
+    position:fixed; z-index:600;
+    bottom: calc(2.2vw + 13px + 18px);
+    right: calc(2.2vw + 13px + 18px);
+    background:var(--amber); color:var(--ink);
+    border:3px solid var(--ink);
+    padding:8px 16px;
+    font-family:'Bangers', cursive;
+    font-size:1.1rem;
+    box-shadow:4px 4px 0 var(--ink);
+    animation:bob 1.6s ease-in-out infinite;
+    pointer-events:none;
+    transition:opacity 0.3s ease;
+  }
+  @keyframes bob{ 0%,100%{transform:translateY(0);} 50%{transform:translateY(-6px);} }
+
+  /* ============ PAGE FRAME (purely decorative, fixed — never part of layout flow) ============ */
+  /* Drawn as a fixed overlay so it can never affect ScrollTrigger's pin math.
+     #comic-stage below is the ONLY element in normal document flow. */
+  #page-frame-deco{
+    position:fixed; inset:0; z-index:500; pointer-events:none;
+    border:2.2vw solid var(--paper);
+    box-shadow:
+      inset 0 0 0 8px  var(--ink),
+      inset 0 0 0 11px var(--paper),
+      inset 0 0 0 13px var(--ink);
+  }
+  #page-frame-deco::before{
+    /* rough page-edge texture, drawn on the paper border itself */
+    content:'';
+    position:absolute; inset:-2.2vw;
+    background-image:radial-gradient(rgba(0,0,0,0.05) 1px, transparent 1px);
+    background-size:3px 3px;
+  }
+
+  #comic-stage{
+    width:100vw; height:100vh;
+    position:relative;
+    overflow:hidden;
+    background:var(--dusk);
+  }
+
+  /* The frame's border+shadow together eat 2.2vw + 13px on every side.
+     Everything the reader actually looks at lives inside this exact inset,
+     so nothing the art draws ever sits under the opaque border. */
+  #safe-area{
+    position:absolute;
+    inset: calc(2.2vw + 13px);
+    overflow:hidden;
+  }
+
+  .page{
+    position:absolute; top:0; left:0;
+    width:100%; height:100%;
+    background-size:contain;
+    background-repeat:no-repeat;
+    background-position:center;
+    background-color:var(--dusk);
+  }
+
+  /* ============ THE FLIP-BOOK: every page turns like a real page ============ */
+  /* Generic leaf mechanics, reused for pages 1 through 7. Each leaf sits above
+     the one it reveals; z-index is assigned inline per leaf so the stack order
+     always matches reading order. */
+  .leaf-stage{ position:absolute; inset:0; perspective:1700px; pointer-events:none; }
+  .leaf{
+    position:relative; width:100%; height:100%;
+    transform-style:preserve-3d;
+    transform-origin:0% 50%; /* hinge on the left spine */
+  }
+  .leaf-face{
+    position:absolute; inset:0;
+    backface-visibility:hidden;
+    background-size:contain;
+    background-repeat:no-repeat;
+    background-position:center;
+    background-color:var(--dusk);
+  }
+  .leaf-face.back{
+    transform:rotateY(180deg);
+    background:var(--paper);
+  }
+  /* Specular highlight that sweeps across the page as it turns — light catching curved paper */
+  .leaf-sheen{
+    position:absolute; inset:0;
+    backface-visibility:hidden;
+    background:linear-gradient(100deg,
+      transparent 30%,
+      rgba(255,255,255,0.35) 46%,
+      rgba(255,255,255,0.08) 54%,
+      transparent 70%);
+    opacity:0;
+    pointer-events:none;
+    mix-blend-mode:overlay;
+  }
+  /* Darkens each leaf as it turns edge-on, like light catching a real page */
+  .leaf-shadow{
+    position:absolute; inset:0;
+    background:#000;
+    opacity:0;
+    pointer-events:none;
+  }
+  /* Soft cast shadow the turning leaf throws onto the page underneath */
+  .leaf-cast-shadow{
+    position:absolute; top:0; left:0; width:35%; height:100%;
+    background:linear-gradient(90deg, rgba(0,0,0,0.55), transparent);
+    opacity:0;
+    pointer-events:none;
+  }
+
+  /* ============ PAGE 0 — THE SEALED WRAP, TORN OPEN ============ */
+  #seal-stage{ position:absolute; inset:0; z-index:80; pointer-events:none; }
+  .seal-flap{
+    position:absolute; top:0; height:100%; width:56%;
+    background:
+      repeating-linear-gradient(135deg, #c9a877, #c9a877 3px, #bd9a68 3px, #bd9a68 6px);
+    box-shadow:inset 0 0 80px rgba(0,0,0,0.28);
+  }
+  .seal-flap.left{
+    left:0; transform-origin:left center;
+    clip-path:polygon(0 0, 92% 0, 100% 5%, 89% 11%, 100% 17%, 90% 24%,
+      100% 31%, 88% 38%, 100% 45%, 91% 52%, 100% 59%, 89% 66%,
+      100% 73%, 90% 80%, 100% 87%, 88% 94%, 100% 100%, 0 100%);
+  }
+  .seal-flap.right{
+    right:0; transform-origin:right center;
+    clip-path:polygon(8% 0, 100% 0, 100% 100%, 8% 100%, 0 94%, 12% 87%,
+      0 80%, 10% 73%, 0 66%, 11% 59%, 0 52%, 9% 45%, 0 38%,
+      12% 31%, 0 24%, 10% 17%, 0 11%, 11% 5%, 0 0);
+  }
+  .seal-tape{
+    position:absolute; left:50%; width:16%; height:5.5%;
+    background:rgba(240,230,207,0.7);
+    box-shadow:0 2px 5px rgba(0,0,0,0.35);
+  }
+  #seal-tape-1{ top:22%; transform:translate(-50%,-50%) rotate(-7deg); }
+  #seal-tape-2{ top:71%; transform:translate(-50%,-50%) rotate(6deg); }
+  #seal-label{
+    position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+    background:var(--paper); border:3px solid var(--ink);
+    padding:20px 30px; text-align:center;
+    box-shadow:6px 6px 0 var(--ink);
+  }
+  #seal-label .title{ font-family:'Bangers', cursive; font-size:2.1rem; color:var(--ink); }
+  #seal-label .sub{
+    font-size:0.72rem; font-weight:700; text-transform:uppercase;
+    letter-spacing:0.06em; margin-top:4px; color:var(--purple);
+  }
+
+  /* ============ PAGE 8 — CHAT OVERLAY ============ */
+  #chat-wrap{
+    position:absolute; left:0; right:0; bottom:0;
+    display:flex; justify-content:center;
+    padding:0 5vw 4vh;
+  }
+  #chat-panel{ width:min(560px, 92vw); display:flex; flex-direction:column; gap:10px; }
+  #stream{
+    max-height:32vh; overflow-y:auto;
+    display:flex; flex-direction:column; gap:10px;
+    padding-right:4px;
+  }
+  #stream::-webkit-scrollbar{ width:6px; }
+  #stream::-webkit-scrollbar-thumb{ background:rgba(240,230,207,0.4); border-radius:4px; }
+
+  .bubble{
+    position:relative; max-width:82%;
+    padding:12px 16px; font-weight:700; font-size:1rem; line-height:1.32;
+    background:var(--paper); color:var(--ink);
+    border:3px solid var(--ink);
+    box-shadow:3px 3px 0 rgba(0,0,0,0.5);
+  }
+  .bubble.eviga{ align-self:flex-start; border-bottom-left-radius:2px; }
+  .bubble.eviga::after{
+    content:''; position:absolute; left:18px; bottom:-11px; width:0; height:0;
+    border-style:solid; border-width:12px 12px 0 0;
+    border-color:var(--paper) transparent transparent transparent;
+    filter:drop-shadow(1px 1px 0 var(--ink));
+  }
+  .bubble.user{ align-self:flex-end; background:var(--amber-bright); border-bottom-right-radius:2px; }
+  .bubble.user::after{
+    content:''; position:absolute; right:18px; bottom:-11px; width:0; height:0;
+    border-style:solid; border-width:12px 0 0 12px;
+    border-color:var(--amber-bright) transparent transparent transparent;
+    filter:drop-shadow(-1px 1px 0 var(--ink));
+  }
+
+  #composer{
+    display:flex; gap:10px;
+    background:rgba(20,16,13,0.55);
+    border:3px solid var(--ink);
+    padding:10px;
+    backdrop-filter:blur(2px);
+  }
+  #composer input{
+    flex:1; border:2px solid var(--ink); background:var(--paper);
+    padding:10px 12px; font-family:'Comic Neue', cursive; font-weight:700;
+    font-size:0.98rem; color:var(--ink); outline:none;
+  }
+  #composer input::placeholder{ color:#6b5f4a; font-weight:400; }
+  #composer input:focus{ background:#fff9e8; }
+  #composer button{
+    font-family:'Bangers', cursive; letter-spacing:0.03em; font-size:1.15rem;
+    background:var(--amber); color:var(--ink); border:2px solid var(--ink);
+    padding:0 22px; cursor:pointer; transition:transform 0.08s ease, background 0.15s ease;
+  }
+  #composer button:hover{ background:var(--amber-bright); }
+  #composer button:active{ transform:translate(2px,2px); }
+  #chat-status{
+    align-self:center; font-size:0.7rem; font-weight:700;
+    letter-spacing:0.03em; color:var(--paper); opacity:0.65;
+  }
+
+  @media (max-width:560px){
+    #stream{ max-height:28vh; }
+    .bubble{ font-size:0.92rem; }
+    #hud, #scroll-hint{ font-size:0.65rem; padding:5px 10px; }
+  }
+</style>
+</head>
+<body>
+
+<div id="hud">EVIGA · SEALED</div>
+<div id="scroll-hint">Scroll ↓</div>
+<div id="page-frame-deco"></div>
+
+<div id="comic-stage">
+<div id="safe-area">
+  <!-- Page 8 is the final resting page — the chat lives here, nothing turns past it -->
+  <section class="page" id="page-8" style="z-index:1; background-image:
+      linear-gradient(180deg, rgba(13,10,18,0.1) 0%, rgba(13,10,18,0.35) 55%, rgba(13,10,18,0.97) 78%, rgba(13,10,18,1) 100%),
+      url('EVIGA 8.png');">
+    <div id="chat-wrap">
+      <div id="chat-panel">
+        <div id="stream"></div>
+        <div id="composer">
+          <input id="chat-input" type="text" placeholder="Type here..." autocomplete="off" />
+          <button id="send-btn">Send</button>
+        </div>
+        <div id="chat-status">You're talking with Eviga</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Pages 7 down to 1 — each one a leaf that turns to reveal the page beneath it -->
+  <div class="leaf-stage" id="leaf-stage-7" style="z-index:10;">
+    <div class="leaf-cast-shadow" id="cast-7"></div>
+    <div class="leaf" id="leaf-7">
+      <div class="leaf-face front" style="background-image:url('EVIGA 7.png');"></div>
+      <div class="leaf-sheen"></div>
+      <div class="leaf-face back"></div>
+      <div class="leaf-shadow" id="shadow-7"></div>
+    </div>
+  </div>
+
+  <div class="leaf-stage" id="leaf-stage-6" style="z-index:20;">
+    <div class="leaf-cast-shadow" id="cast-6"></div>
+    <div class="leaf" id="leaf-6">
+      <div class="leaf-face front" style="background-image:url('EVIGA 6.png');"></div>
+      <div class="leaf-sheen"></div>
+      <div class="leaf-face back"></div>
+      <div class="leaf-shadow" id="shadow-6"></div>
+    </div>
+  </div>
+
+  <div class="leaf-stage" id="leaf-stage-5" style="z-index:30;">
+    <div class="leaf-cast-shadow" id="cast-5"></div>
+    <div class="leaf" id="leaf-5">
+      <div class="leaf-face front" style="background-image:url('EVIGA 5.png');"></div>
+      <div class="leaf-sheen"></div>
+      <div class="leaf-face back"></div>
+      <div class="leaf-shadow" id="shadow-5"></div>
+    </div>
+  </div>
+
+  <div class="leaf-stage" id="leaf-stage-4" style="z-index:40;">
+    <div class="leaf-cast-shadow" id="cast-4"></div>
+    <div class="leaf" id="leaf-4">
+      <div class="leaf-face front" style="background-image:url('EVIGA 4.png');"></div>
+      <div class="leaf-sheen"></div>
+      <div class="leaf-face back"></div>
+      <div class="leaf-shadow" id="shadow-4"></div>
+    </div>
+  </div>
+
+  <div class="leaf-stage" id="leaf-stage-3" style="z-index:50;">
+    <div class="leaf-cast-shadow" id="cast-3"></div>
+    <div class="leaf" id="leaf-3">
+      <div class="leaf-face front" style="background-image:url('EVIGA 3.png');"></div>
+      <div class="leaf-sheen"></div>
+      <div class="leaf-face back"></div>
+      <div class="leaf-shadow" id="shadow-3"></div>
+    </div>
+  </div>
+
+  <div class="leaf-stage" id="leaf-stage-2" style="z-index:60;">
+    <div class="leaf-cast-shadow" id="cast-2"></div>
+    <div class="leaf" id="leaf-2">
+      <div class="leaf-face front" style="background-image:url('EVIGA 2.png');"></div>
+      <div class="leaf-sheen"></div>
+      <div class="leaf-face back"></div>
+      <div class="leaf-shadow" id="shadow-2"></div>
+    </div>
+  </div>
+
+  <div class="leaf-stage" id="leaf-stage-1" style="z-index:70;">
+    <div class="leaf-cast-shadow" id="cast-1"></div>
+    <div class="leaf" id="leaf-1">
+      <div class="leaf-face front" style="background-image:url('EVIGA 1.png');"></div>
+      <div class="leaf-sheen"></div>
+      <div class="leaf-face back"></div>
+      <div class="leaf-shadow" id="shadow-1"></div>
+    </div>
+  </div>
+
+  <!-- Page 0 — the sealed wrap, tears open to reveal the cover underneath -->
+  <div id="seal-stage">
+    <div class="seal-flap left"></div>
+    <div class="seal-flap right"></div>
+    <div class="seal-tape" id="seal-tape-1"></div>
+    <div class="seal-tape" id="seal-tape-2"></div>
+    <div id="seal-label">
+      <div class="title">EVIGA</div>
+      <div class="sub">Sealed · Do Not Open Until Needed</div>
+    </div>
+  </div>
+</div>
+</div>
+
+<script>
+  // ==========================================
+  // EMAILJS CONFIG — fill these in before hosting
+  // ==========================================
+  const EMAILJS_PUBLIC_KEY  = "Sk1Cxa6-PbwE7Bt1C";
+  const EMAILJS_SERVICE_ID  = "service_efzvr44";
+  const EMAILJS_TEMPLATE_ID = "template_g2s3ixt";
+
+  if (EMAILJS_PUBLIC_KEY !== "YOUR_EMAILJS_PUBLIC_KEY") {
+    emailjs.init({ publicKey: EMAILJS_PUBLIC_KEY });
+  }
+
+  // ==========================================
+  // GSAP SCROLLYTELLING
+  // ==========================================
+  gsap.registerPlugin(ScrollTrigger);
+
+  // Prevent the browser restoring a nonzero scroll position on reload,
+  // and make sure we always start exactly at the top.
+  if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+  window.scrollTo(0, 0);
+
+  const leafNumbers = [1, 2, 3, 4, 5, 6, 7]; // turn order: cover first, down to page 7
+
+  const labels = [
+    "SEALED", "COVER", "THE BLACKOUT", "THE STATIC", "THE DENIAL",
+    "THE TURNING POINT", "THE PRACTICE", "THE CHOICE", "THE SANCTUARY"
+  ];
+  const totalSegments = 1 + leafNumbers.length; // tear + 7 page turns
+  const hud = document.getElementById('hud');
+  const scrollHint = document.getElementById('scroll-hint');
+
+  const master = gsap.timeline({
+    scrollTrigger: {
+      trigger: "#comic-stage",
+      start: "top top",
+      end: () => "+=" + totalSegments * 1600,
+      scrub: 1.1,
+      pin: true,
+      anticipatePin: 1,
+      snap: {
+        snapTo: 1 / totalSegments,
+        duration: { min: 0.35, max: 0.7 },
+        ease: "power2.inOut"
+      }
+    }
+  });
+
+  // ---- Segment 1: the wrap tears open, two flaps peel apart ----
+  master.to('.seal-flap.left',  { xPercent: -120, rotate: -7,  ease: "none", duration: 1 }, 0);
+  master.to('.seal-flap.right', { xPercent: 120,  rotate: 7,   ease: "none", duration: 1 }, 0);
+  master.to('#seal-label',      { scale: 0.55, opacity: 0,     ease: "none", duration: 1 }, 0);
+  master.to('.seal-tape',       { opacity: 0,                  ease: "none", duration: 1,
+    onUpdate: function () {
+      hud.textContent = "EVIGA · " + (this.progress() > 0.5 ? labels[1] : labels[0]);
+    }
+  }, 0);
+
+  // ---- Segments 2-8: each page turns like a real page, spine on the left ----
+  leafNumbers.forEach((n, i) => {
+    const leaf  = document.getElementById('leaf-' + n);
+    const sheen  = leaf.querySelector('.leaf-sheen');
+    const shadow = document.getElementById('shadow-' + n);
+    const cast   = document.getElementById('cast-' + n);
+    const isLast = i === leafNumbers.length - 1;
+
+    master.to(leaf, {
+      rotateY: -170,
+      ease: "none",
+      duration: 1,
+      onUpdate: function () {
+        const p = this.progress();
+        hud.textContent = "EVIGA · " + (p > 0.5 ? labels[i + 2] : labels[i + 1]);
+
+        // page darkens as it turns edge-on
+        shadow.style.opacity = Math.sin(p * Math.PI) * 0.55;
+        // shadow cast onto the page underneath, strongest early
+        cast.style.opacity = Math.max(0, 0.7 - p * 1.4);
+        // specular highlight sweeps across early in the turn, like light catching lifting paper
+        sheen.style.opacity = Math.max(0, Math.sin(p * Math.PI * 1.4)) * 0.9;
+        sheen.style.transform = `translateX(${(p - 0.5) * 60}%)`;
+        // the page "lifts" off the surface mid-turn — elevation shadow grows then settles
+        const lift = Math.sin(p * Math.PI); // 0 at start/end, peaks at p=0.5
+        leaf.style.filter = `drop-shadow(${lift * 22}px ${lift * 10}px ${lift * 26}px rgba(0,0,0,${lift * 0.5}))`;
+
+        if (isLast) scrollHint.style.opacity = p > 0.7 ? '0' : '1';
+      }
+    }, 1 + i);
+  });
+
+  // ==========================================
+  // CONVERSATIONAL STATE MACHINE
+  // ==========================================
+  const STEPS = { NAME:0, AGE:1, LOCATION:2, EMAIL:3, GRIEVANCE:4, DONE:5 };
+  let step = STEPS.NAME;
+  const visitor = { name:'', age:'', location:'', email:'', grievance:'' };
+
+  const stream   = document.getElementById('stream');
+  const input    = document.getElementById('chat-input');
+  const sendBtn  = document.getElementById('send-btn');
+  const status   = document.getElementById('chat-status');
+
+  function say(who, text){
+    const row = document.createElement('div');
+    row.className = 'bubble ' + who;
+    row.textContent = text;
+    stream.appendChild(row);
+    stream.scrollTop = stream.scrollHeight;
+  }
+
+  say('eviga', "Hey. I don't know what brought you here tonight, but I'm glad you did. What's going on? I'm Eviga, by the way — what should I call you?");
+
+  async function handleSend(){
+    const val = input.value.trim();
+    if(!val) return;
+    say('user', val);
+    input.value = '';
+    status.textContent = "Eviga is listening...";
+
+    setTimeout(async () => {
+      if(step === STEPS.NAME){
+        visitor.name = val;
+        say('eviga', `Good to meet you, ${val}. Mind if I ask how old you are? Just helps me understand where you're coming from.`);
+        step = STEPS.AGE;
+      } else if(step === STEPS.AGE){
+        visitor.age = val;
+        say('eviga', "Thanks. And where are you writing to me from tonight?");
+        step = STEPS.LOCATION;
+      } else if(step === STEPS.LOCATION){
+        visitor.location = val;
+        say('eviga', "Got it. Can I get an email from you? So I can check in on you after tonight.");
+        step = STEPS.EMAIL;
+      } else if(step === STEPS.EMAIL){
+        visitor.email = val;
+        say('eviga', "Okay. I'm listening — take your time. What's going on?");
+        input.placeholder = "Tell her what's on your mind...";
+        step = STEPS.GRIEVANCE;
+      } else if(step === STEPS.GRIEVANCE){
+        visitor.grievance = val;
+        step = STEPS.DONE;
+        input.disabled = true;
+        sendBtn.disabled = true;
+        status.textContent = "Sending your signal...";
+
+        try {
+          if (EMAILJS_PUBLIC_KEY !== "YOUR_EMAILJS_PUBLIC_KEY") {
+            await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
+              visitor_name: visitor.name,
+              visitor_age: visitor.age,
+              visitor_location: visitor.location,
+              visitor_email: visitor.email,
+              visitor_grievance: visitor.grievance,
+              timestamp: new Date().toLocaleString(),
+            });
+          }
+        } catch(err){ console.error("EmailJS error:", err); }
+
+        say('eviga', `I hear you, ${visitor.name}. You don't have to carry this alone. I've got it — I'll be thinking about this, and about you.`);
+        status.textContent = "✓ Message received";
+      }
+    }, 450);
+  }
+
+  sendBtn.addEventListener('click', handleSend);
+  input.addEventListener('keydown', e => { if(e.key === 'Enter') handleSend(); });
+
+  // Re-sync scroll position and ScrollTrigger's measurements once everything
+  // (fonts, background images) has actually finished loading.
+  window.addEventListener('load', () => {
+    window.scrollTo(0, 0);
+    ScrollTrigger.refresh();
+  });
+</script>
+</body>
+</html>
