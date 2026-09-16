@@ -378,7 +378,7 @@
   // EMAILJS CONFIG — fill these in before hosting
   // ==========================================
   const EMAILJS_PUBLIC_KEY  = "Sk1Cxa6-PbwE7Bt1C";
-  const EMAILJS_SERVICE_ID  = "service_efzvr44";
+  const EMAILJS_SERVICE_ID  = "service_2fzp5ep";
   const EMAILJS_TEMPLATE_ID = "template_g2s3ixt";
 
   if (EMAILJS_PUBLIC_KEY !== "YOUR_EMAILJS_PUBLIC_KEY") {
@@ -518,20 +518,31 @@
         status.textContent = "Sending your signal...";
 
         try {
-          if (EMAILJS_PUBLIC_KEY !== "YOUR_EMAILJS_PUBLIC_KEY") {
-            await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
-              visitor_name: visitor.name,
-              visitor_age: visitor.age,
-              visitor_location: visitor.location,
-              visitor_email: visitor.email,
-              visitor_grievance: visitor.grievance,
-              timestamp: new Date().toLocaleString(),
-            });
+          if (EMAILJS_PUBLIC_KEY === "YOUR_EMAILJS_PUBLIC_KEY" ||
+              EMAILJS_SERVICE_ID === "YOUR_EMAILJS_SERVICE_ID" ||
+              EMAILJS_TEMPLATE_ID === "YOUR_EMAILJS_TEMPLATE_ID") {
+            throw new Error("EmailJS is not fully configured.");
           }
-        } catch(err){ console.error("EmailJS error:", err); }
 
-        say('eviga', `I hear you, ${visitor.name}. You don't have to carry this alone. I've got it — I'll be thinking about this, and about you.`);
-        status.textContent = "✓ Message received";
+          const response = await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
+            visitor_name: visitor.name,
+            visitor_age: visitor.age,
+            visitor_location: visitor.location,
+            visitor_email: visitor.email,
+            visitor_grievance: visitor.grievance,
+            timestamp: new Date().toLocaleString(),
+          });
+
+          console.log("EmailJS success:", response.status, response.text);
+          say('eviga', `I hear you, ${visitor.name}. You don't have to carry this alone. I've got it — I'll be thinking about this, and about you.`);
+          status.textContent = "✓ Message received";
+        } catch(err) {
+          console.error("EmailJS error:", err);
+          input.disabled = false;
+          sendBtn.disabled = false;
+          status.textContent = "⚠ Signal failed — try again";
+          say('eviga', "I couldn't send your signal just now. Try once more, and I'll keep listening.");
+        }
       }
     }, 450);
   }
